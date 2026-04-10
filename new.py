@@ -361,7 +361,7 @@ def process_provodki_sheet_stage1(wb_read, template_keys, logger, stats):
     """
     Обработать лист Проводки (Этап 2 - первая часть)
     Создать словарь ключей для проводок без развёрнутых
-    Возвращает словарь ключей и список результатов для записи
+    Возвращает словарь ключей, список результатов для записи и mapping_cache
     """
     sheet_name = "Проводки по СП анализ"
     ws = wb_read[sheet_name]
@@ -380,6 +380,7 @@ def process_provodki_sheet_stage1(wb_read, template_keys, logger, stats):
     provodki_keys = defaultdict(list)
     results_template = []  # Результаты для записи в Шаблон
     results_provodki = []  # Результаты для записи в Проводки
+    mapping_cache = {}  # Кеш ссылок для этапа 3 (развёрнутые проводки)
     
     processed_count = 0
     error_count = 0
@@ -498,6 +499,10 @@ def process_provodki_sheet_stage1(wb_read, template_keys, logger, stats):
                     if pokaza and pokaza not in pokaza_values:
                         pokaza_values.append(pokaza)
                 
+                # Формируем значения ссылок
+                dt_value = join_references(dt_refs)
+                kt_value = join_references(kt_refs)
+                
                 # Записываем в результаты для Проводок
                 results_provodki.append({
                     'sheet': 'Проводки по СП анализ',
@@ -505,21 +510,30 @@ def process_provodki_sheet_stage1(wb_read, template_keys, logger, stats):
                     'dt_mapping_col': col_dt_mapping,
                     'kt_mapping_col': col_kt_mapping,
                     'sp_robot_col': col_sp_robot,
-                    'dt_value': join_references(dt_refs),
-                    'kt_value': join_references(kt_refs),
+                    'dt_value': dt_value,
+                    'kt_value': kt_value,
                     'sp_value': ", ".join(pokaza_values)
                 })
+                
+                # Сохраняем ссылки в кеш для использования на этапе 3
+                mapping_cache[provodki_info['row']] = {
+                    'dt_value': dt_value,
+                    'kt_value': kt_value
+                }
+                
                 provodki_matched += 1
     
     stats.provodki_matched = provodki_matched
     print(f"✓ Сматчено строк Проводки → Шаблон: {provodki_matched}")
+    print(f"✓ Ссылок сохранено в кеш для этапа 3: {len(mapping_cache)}")
     
-    return provodki_keys, results_template, results_provodki
+    return provodki_keys, results_template, results_provodki, mapping_cache
 
 
-def process_expanded_provodki(wb_read, logger, stats):
+def process_expanded_provodki(wb_read, mapping_cache, logger, stats):
     """
     Обработать развёрнутые проводки (Этап 3)
+    Использует mapping_cache для получения ссылок из этапа 2
     Возвращает список результатов для записи
     """
     sheet_name = "Проводки по СП анализ"
@@ -558,25 +572,26 @@ def process_expanded_provodki(wb_read, logger, stats):
                              expanded_str, "Не удалось распарсить номера строк")
             continue
         
-        # Собираем ссылки из указанных строк
+        # Собираем ссылки из указанных строк (используя кеш из этапа 2)
         dt_refs = []
         kt_refs = []
         
         for ref_row in row_numbers:
-            # Читаем значения из указанной строки
-            dt_mapping_val = ws.cell(row=ref_row, column=col_dt_mapping).value
-            kt_mapping_val = ws.cell(row=ref_row, column=col_kt_mapping).value
-            
-            # Если значения есть, добавляем их
-            if dt_mapping_val:
-                dt_str = str(dt_mapping_val).strip()
-                if dt_str:
-                    dt_refs.append(dt_str)
-            
-            if kt_mapping_val:
-                kt_str = str(kt_mapping_val).strip()
-                if kt_str:
-                    kt_refs.append(kt_str)
+            # Читаем значения из кеша (сформированные на этапе 2)
+            if ref_row in mapping_cache:
+                cached_data = mapping_cache[ref_row]
+                
+                # Добавляем Дт ссылки
+                if cached_data.get('dt_value'):
+                    dt_refs.append(cached_data['dt_value'])
+                
+                # Добавляем Кт ссылки
+                if cached_data.get('kt_value'):
+                    kt_refs.append(cached_data['kt_value'])
+            else:
+                # Строка не была обработана на этапе 2 - логируем предупреждение
+                logger.log_warning(sheet_name, row_num, "Номера строк развёрнутых проводок",
+                                 ref_row, f"Строка {ref_row} не найдена в кеше мэппинга")
         
         # Записываем результаты
         if dt_refs or kt_refs:
@@ -670,13 +685,13 @@ def main():
         
         # 6. Обработка Проводок (Этап 2)
         print("Шаг 5: Обработка листа 'Проводки по СП анализ'...")
-        provodki_keys, results_template, results_provodki = process_provodki_sheet_stage1(
+        provodki_keys, results_template, results_provodki, mapping_cache = process_provodki_sheet_stage1(
             wb_read, template_keys, logger, stats)
         print()
         
         # 7. Обработка развёрнутых проводок (Этап 3)
         print("Шаг 6: Обработка развёрнутых проводок...")
-        results_expanded = process_expanded_provodki(wb_read, logger, stats)
+        results_expanded = process_expanded_provodki(wb_read, mapping_cache, logger, stats)
         print()
         
         # Закрываем workbook для чтения
