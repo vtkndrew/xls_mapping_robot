@@ -13,6 +13,12 @@ import re
 import os
 
 
+# DEBUG: Проблемные строки для детального логирования
+DEBUG_TEMPLATE_ROWS = [2335, 2857]
+DEBUG_PROVODKI_ROWS = [2194, 2203]
+DEBUG_ENABLED = True  # Установите False для отключения debug-логирования
+
+
 class ProcessLogger:
     """Класс для логирования ошибок и предупреждений"""
     
@@ -628,17 +634,58 @@ def write_results_to_excel(input_file, all_results):
         ws = wb_write[sheet_name]
         row = result['row']
         
+        # DEBUG: Логирование для проблемных строк
+        is_debug_row = DEBUG_ENABLED and (
+            (sheet_name == "Шаблон пров и атриб" and row in DEBUG_TEMPLATE_ROWS) or
+            (sheet_name == "Проводки по СП анализ" and row in DEBUG_PROVODKI_ROWS)
+        )
+        
+        if is_debug_row:
+            print(f"\n=== DEBUG write_results_to_excel ===")
+            print(f"  Лист: {sheet_name}")
+            print(f"  Строка: {row}")
+            print(f"  Содержимое result:")
+            for key, value in result.items():
+                if isinstance(value, str) and len(value) > 100:
+                    print(f"    {key}: '{value[:100]}...' [длина={len(value)}]")
+                else:
+                    print(f"    {key}: {repr(value)}")
+        
         # Записываем Дт Мэпинг Робот
         if 'dt_value' in result and result['dt_value']:
             ws.cell(row=row, column=result['dt_mapping_col']).value = result['dt_value']
+            if is_debug_row:
+                print(f"  ✅ Дт Мэпинг записан в столбец {result['dt_mapping_col']}")
+        elif is_debug_row:
+            print(f"  ❌ Дт Мэпинг НЕ записан:")
+            print(f"     'dt_value' in result = {('dt_value' in result)}")
+            if 'dt_value' in result:
+                print(f"     result['dt_value'] = {repr(result['dt_value'])}")
+                print(f"     bool(result['dt_value']) = {bool(result['dt_value'])}")
         
         # Записываем Кт Мэпинг Робот
         if 'kt_value' in result and result['kt_value']:
             ws.cell(row=row, column=result['kt_mapping_col']).value = result['kt_value']
+            if is_debug_row:
+                print(f"  ✅ Кт Мэпинг записан в столбец {result['kt_mapping_col']}")
+        elif is_debug_row:
+            print(f"  ❌ Кт Мэпинг НЕ записан:")
+            print(f"     'kt_value' in result = {('kt_value' in result)}")
+            if 'kt_value' in result:
+                print(f"     result['kt_value'] = {repr(result['kt_value'])}")
+                print(f"     bool(result['kt_value']) = {bool(result['kt_value'])}")
         
         # Записываем СП Робот (если есть)
         if 'sp_value' in result and result['sp_value']:
             ws.cell(row=row, column=result['sp_robot_col']).value = result['sp_value']
+            if is_debug_row:
+                print(f"  ✅ СП Робот записан в столбец {result['sp_robot_col']}")
+        elif is_debug_row and 'sp_robot_col' in result:
+            print(f"  ❌ СП Робот НЕ записан:")
+            print(f"     'sp_value' in result = {('sp_value' in result)}")
+            if 'sp_value' in result:
+                print(f"     result['sp_value'] = {repr(result['sp_value'])}")
+                print(f"     bool(result['sp_value']) = {bool(result['sp_value'])}")
     
     # Сохраняем файл
     wb_write.save(output_file)
